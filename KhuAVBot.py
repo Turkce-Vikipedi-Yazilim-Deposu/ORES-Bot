@@ -6,6 +6,7 @@ from urllib import request
 from urllib.error import HTTPError, URLError
 import logging
 import sys
+import datetime
 
 
 def get_html(query_url):
@@ -88,7 +89,7 @@ def is_badfaith(json_scores):
         badfaith_json = json_scores[revision]["damaging"]
         if badfaith_json["prediction"] == True:
             if badfaith_json["probability"]["false"] > badfaith_treshhold:
-                badfaith = False
+                badfaith = True
         return badfaith
 
 
@@ -104,30 +105,51 @@ def reverter(page):
     new = page.getOldVersion(history[1].revid)
     pywikibot.showDiff(old, new)
     # page.save(comment) # Currently not saving anything!
+    return True
+
+
+def one_day_rule(page):
+    did_we_edit_the_page_today = False
+    today = datetime.datetime.now()
+    yesterday = datetime.datetime.now() - datetime.timedelta(hours=24)
+    revisions = page.revisions(starttime=today, endtime=yesterday)
+    for rev in revisions:
+        if rev["timestamp"] > yesterday:
+            if rev["user"] == username:
+                did_we_edit_the_page_today = True
+                print(rev["user"], rev["timestamp"], "EDITED TODAY")
+    return did_we_edit_the_page_today
 
 
 def main():
     print("Revid\tDamaging?\t%Dmg\tBadfaith?\t%BF\tUser\tUsertype\tPage")
     for page in generator:
         try:
-            if page._rcinfo['namespace'] == 0:
-                ores_scores = get_html(ores_query+str(page.latest_revision_id))
-                json_scores = json.loads(ores_scores)
-                damaging = is_damaging(json_scores)
-                badfaith = is_badfaith(json_scores)
-                json_printer(str(page.latest_revision_id), json_scores, page)
-                if damaging and badfaith:
-                    reverter(page)
+            if page.latest_revision["user"] in trusted_users_list:
+                pass  # Trusted user
+            else:
+                if page._rcinfo['namespace'] == 0:
+                    ores_scores = get_html(ores_query+str(page.latest_revision_id))
+                    json_scores = json.loads(ores_scores)
+                    damaging = is_damaging(json_scores)
+                    badfaith = is_badfaith(json_scores)
+                    json_printer(str(page.latest_revision_id), json_scores, page)
+                    if damaging and badfaith:
+                        did_we_edit_today = one_day_rule(page)
+                        if did_we_edit_today == False:
+                            revert_status = reverter(page)
+                            if revert_status:
+                                print("REVERTED!")
 
         except pywikibot.exceptions.NoPage:
-            print("NOPAGE")
+            # print("NOPAGE")
             pass
 
-        except:
-            # Too broad exception
-            print("Error...", end="\t")
-            print(sys.exc_info())
-            pass
+        #except:
+        #    # Too broad exception
+        #    print("Error...", end="\t")
+        #    print(sys.exc_info())
+        #    pass
 
 
 if __name__ == "__main__":
@@ -137,8 +159,10 @@ if __name__ == "__main__":
 
     project = pywikibot.Site('tr', 'wikipedia')
     site = pywikibot.Site()
+    username = site.username()
     generator = pagegenerators.LiveRCPageGenerator(site, total=None)
     trusted_users_list = get_trusted_users()
 
     # Run Forrest, RUN!
     main()
+    
